@@ -1,6 +1,6 @@
 # Reddit Discourse Analysis in R: Sentiment, Topics & Engagement
 
-An exploratory text-analysis project from UCL's postgraduate **Applied Data Science module (SECU0057, 2024)**. I collected Reddit discussions about the Palestine–Israel conflict, cleaned and analysed the text in R, and wrote up the work as an 11-page, two-column research-style report.
+An exploratory text-analysis project from UCL's postgraduate **Applied Data Science module (SECU0057, 2024)**. I collected Reddit discussions about the Palestine–Israel conflict, cleaned and analysed the text in R, and wrote up the work as an 11-page, two-column research-style report (84 marks).
 
 **At a glance:** 1,638 threads and 137,683 comments collected from 30 March to 30 April 2024; an end-to-end workflow covering collection, preprocessing, descriptive text analysis, sentiment scoring, LDA topic modelling, and regression on engagement.
 
