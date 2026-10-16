@@ -15,7 +15,7 @@ An exploratory text-analysis project from UCL's postgraduate **Applied Data Scie
 - **Data collection:** used `RedditExtractoR` to collect thread metadata and comments from relevant subreddits and keyword searches.
 - **Data preparation and NLP:** cleaned text, tokenised comments, and compared type–token ratio and Flesch–Kincaid readability across sources using R tools including `quanteda`.
 - **Analysis:** applied a sentiment lexicon, trained a four-topic LDA model, and fitted a linear regression to explore associations with upvotes.
-- **Communication:** presented figures and critical limitations in a concise two-column report.
+- **Communication:** wrote and typeset the two-column report in LaTeX using Overleaf, with figures and a discussion of limitations.
 
 The report found differences in sentiment and themes across the sampled communities. Its regression explained only about **0.35%** of variation in upvotes, and the stance labels were exploratory rules derived from topics and sentiment rather than a validated classifier. These limits matter when interpreting the findings.
 
