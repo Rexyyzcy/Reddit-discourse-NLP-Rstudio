@@ -1,0 +1,140 @@
+---
+title: "W3_Homework"
+date: "2024-01-28"
+output: html_notebook 
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(eval = FALSE)
+
+library(quanteda)
+library(quanteda.textstats)
+
+```
+
+---
+
+## Homework
+
+### Part 1: Text pre-processing
+
+Among the various researchers-degrees-of-freedom in natural language processing are decisions about:
+
+- the stemming of words
+- the removal of punctuation
+- the removal of stopwords
+- lower-casing the corpus
+- the sparsity trimming (e.g. https://quanteda.io/reference/dfm_trim.html)
+
+Use a corpus of your choice: and build a TFIDF matrix for the original corpus and all possible combinations from the decisions to-be-made above. All of these can be done using base R and quanteda. 
+
+_Hint: for the sparsity trimming, have a look at [this function](https://quanteda.io/reference/dfm_trim.html)_.
+
+```{r}
+#step0. token the Corpus 
+dfm_US_speeches <- dfm(tokens(US_speeches)) 
+
+dfm_remove( stopwords("english")) %>% 
+
+#1.the stemming of words
+dfm_wordstem(dfm_US_speeches, language = quanteda_options("language_stemmer")) %>% dfm_tfidf()
+  
+#2. the removal of punctuation 
+tokens(US_speeches, remove_punct = TRUE) %>% dfm() %>% dfm_tfidf()  
+
+#3. the removal of stopwords
+tokens(US_speeches) %>% dfm() %>% dfm_remove( stopwords("english")) %>% dfm_tfidf()  
+
+#4. lower-casing the corpus
+tokens(US_speeches) %>% dfm() %>% dfm_tolower() %>% dfm_tfidf()
+
+#5. the sparsity trimming
+tokens(US_speeches) %>% dfm() %>% dfm_trim(sparsity = 1) %>% dfm_tfidf() 
+# specify a value 0-1, 0 removes all sparsity terms 
+ 
+```
+
+
+### Part 2: Practising with the `quanteda` package
+
+The R package {`quanteda`}(https://quanteda.io/index.html) is a powerful toolbox to deal with text data in R. You will likely need this package for the natural language processing part of your final project. Do learn more about this package, read through and replicate for yourself these two tutorials:
+
+- [Examining literature with quanteda in R](https://quanteda.io/articles/pkgdown/replication/digital-humanities.html)
+- [Analysing social media (Twitter) data with quanteda](https://quanteda.io/articles/pkgdown/examples/twitter.html)
+
+
+---
+# Twitter
+
+```{r}
+#set wd
+setwd("C:/Users/Cheny/Desktop/UCL Msc/Applied Data Science/Tutorials/Week3")
+
+#load data
+load("data_corpus_tweets.rda")
+
+
+```
+
+
+## Hashtags
+
+```{r}
+
+#Construct a DFM of Twitter posts
+dfmat_tweets <- tokens(data_corpus_tweets, remove_punct = TRUE) %>%
+    dfm()
+
+head(dfmat_tweets)
+
+
+
+#Extract most common hashtags
+#select terms begins with #
+dfmat_tag <- dfm_select(dfmat_tweets, pattern = "#*")
+
+#use topfeatures to extract top numbers, then use names to retrieve the names of #
+toptag <- names(topfeatures(dfmat_tag, 50))
+
+head(toptag)
+
+
+#Construct feature-occurrence matrix of hashtags
+#fcm: Feature Co-occurance Matrix, how two terms occur together in the same document.
+library("quanteda.textplots")
+fcmat_tag <- fcm(dfmat_tag)
+head(fcmat_tag)
+
+
+
+#only select the top tags defined earlier using topfeatures
+fcmat_topgat <- fcm_select(fcmat_tag, pattern = toptag)
+
+textplot_network(fcmat_topgat, min_freq = 0.1, edge_alpha = 0.8, edge_size = 5)
+
+```
+
+How the top occurring hastags co-occur together
+
+## Usernames
+
+```{r}
+#Extract most frequently mentioned usernames
+#usernames start with @
+dfmtat_users <- dfm_select(dfmat_tweets, pattern = "@*")
+
+topuser <- names(topfeatures(dfmtat_users, 50))
+head(topuser)
+
+
+#Construct feature-occurrence matrix of usernames
+fcmat_users <- fcm(dfmtat_users)
+head(fcmat_users)
+
+#select the top users
+fcmat_users <- fcm_select(fcmat_users, pattern = topuser)
+textplot_network(fcmat_users, min_freq = 0.1, edge_color = "orange", edge_alpha = 0.8, edge_size = 5)
+
+```
+
+How the top occurring usernames co-occur together 

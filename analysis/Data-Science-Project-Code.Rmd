@@ -1,0 +1,779 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r setup}
+#only display the code, dont run
+knitr::opts_chunk$set(
+	eval = FALSE,
+	echo = TRUE,
+	message = FALSE,
+	warning = FALSE
+)
+```
+
+# Library
+```{r}
+#some useful data cleaning functions, pipe
+library(dplyr)
+#text mining
+library(quanteda)
+library(quanteda.textstats)
+#string manipulation, ste_extract
+library(stringr)
+#word cloud
+library(quanteda.textplots)
+#Topic modelling LDA
+library(topicmodels)
+#visualization
+library(ggplot2)
+#use for text cleaning without creating corpus, for sentiment analysis
+library(stringr)
+#used to read txt
+library(readtext)
+#used for sentiment analysis
+library(syuzhet)
+library(tm)
+#tidy function used 
+library(tidytext)
+```
+
+
+
+
+# Data Collection
+
+```{r}
+#install.packages("RedditExtractoR")
+library(RedditExtractoR)
+
+#find top 10 subscribed subreddits related to "palestine" and "Israel"
+subreddit1 <- RedditExtractoR::find_subreddits("palestine")
+arrange(subreddit1,desc(subscribers))
+
+subreddit2 <- RedditExtractoR::find_subreddits("Israel")
+arrange(subreddit2,desc(subscribers))
+
+#combine by row
+all_subreddits <- rbind(subreddit1,subreddit2)
+
+#subreddits arrange by subscribers
+all_subreddits <- arrange(all_subreddits,desc(subscribers))
+
+
+# Remove duplicates based on 
+distinct_data_by_subreddit <- distinct(all_subreddits, subreddit, .keep_all = TRUE)
+
+
+#select some relevant subreddits
+selected_subreddit <- distinct_data_by_subreddit[distinct_data_by_subreddit$subreddit %in% c("worldnews","politics","Palestine","Israel"), ]
+
+
+# Find URLs of threads from the each subreddit, sorted by "hot", does not limit period
+thread_urls_Palestine <- find_thread_urls(subreddit="Palestine", sort_by="hot")
+dim(thread_urls_Palestine) #640 threads
+#check threads with top comments are relevant to our study
+arrange(thread_urls_Palestine,desc(comments)) 
+
+
+thread_urls_Israel <- find_thread_urls(subreddit="Israel", sort_by="hot")
+dim(thread_urls_Israel) #754 threads
+#check threads with top comments are relevant to our study
+arrange(thread_urls_Israel,desc(comments)) 
+
+thread_urls_politics <- find_thread_urls(subreddit="politics", sort_by="relevant")
+dim(thread_urls_politics) #690 threads
+#check threads with top comments are relevant to our study
+#we can see many irrelevant hot threads in the past month,i.e. Trump news
+arrange(thread_urls_politics,desc(comments))
+
+
+thread_urls_worldnews <- find_thread_urls(subreddit="worldnews", sort_by="hot")
+dim(thread_urls_worldnews) #639 threads
+#check threads with top comments are relevant to our study
+#we can see many irrelevant hot threads in the past month,i.e. Trump news
+arrange(thread_urls_worldnews,desc(comments))
+#similar problem here, over past month many irrelacant threads, even the subreddit is associated to Palestine/Israel
+
+#Consider search some keywords across all subreddit, using comments sort_by
+thread_urls_byKeywords <- find_thread_urls(keywords="Palestine Israel Gaza genocide ", sort_by="comments")
+arrange(thread_urls_byKeywords,desc(comments))
+dim(thread_urls_byKeywords) #244 threads
+
+#combine all threads extracted
+
+thread_url_Total <-rbind(thread_urls_Palestine,thread_urls_Israel,thread_urls_byKeywords)
+dim(thread_url_Total)
+
+#check no duplites using url
+distinct(thread_url_Total, url, .keep_all = TRUE)
+
+
+
+
+#After obtaining thread URLs, you can extract content from these threads, metadata or contents
+urls <- thread_url_Total$url
+head(urls,10)
+
+Total_thread_content <- get_thread_content(urls)
+print(Total_thread_content)
+dim(Total_thread_content$comments) #137683 comments
+
+#Save the data locally so dont have to extract again
+# Write data to CSV
+write.csv(thread_url_Total, "thread_url_Total.csv", row.names = FALSE)
+
+write.csv(Total_thread_content$threads, "threadsmeta_Total.csv", row.names = FALSE)
+
+
+
+#Write comment data into RData
+threadsComment_Total<- Total_thread_content$comments
+save(threadsComment_Total, file = "threadsComment_Total.RData")
+
+```
+
+
+```{r}
+#load the comment data
+load("threadsComment_Total.RData")
+
+# Add a new column to the data frame to specify which subreddit comment comes from
+threadsComment_Total <- threadsComment_Total %>%
+  mutate(Subreddit = str_extract(url, "(?<=reddit\\.com/r/)[^/]+"), # Extract subreddit from URL
+         Subreddit = case_when(
+           Subreddit == "Palestine" ~ "r/Palestine",
+           Subreddit == "Israel" ~ "r/Israel",
+           TRUE ~ "Others"  # Assign 'Others' if not matched to specific subreddits
+         ))
+
+
+#95605 comments from Others subreddits
+table(threadsComment_Total$Subreddit)
+
+
+#Separate different subreddits
+Israel_subreddit_comment<-
+threadsComment_Total %>%
+filter(threadsComment_Total$Subreddit == "r/Israel") 
+
+Palestine_subreddit_comment<-
+threadsComment_Total %>%
+filter(threadsComment_Total$Subreddit == "r/Palestine") 
+
+Others_subreddit_comment<-
+threadsComment_Total %>%
+filter(threadsComment_Total$Subreddit == "Others") 
+
+
+
+```
+
+# Data Analaysis
+
+## 1. We use comparative analysis between r/Palestine and r/Israel and others
+
+We compare the lexity of comments in two subreddits and does not find huge difference, we need a unsupervised ml algorithm which captures sementic meaning (LDA, Glove, Word2Vec)
+
+
+### Data processing and TTR
+
+```{r}
+
+#Construct corpus for each subreddit, include upvotes as docvar
+Israel_corpus <- corpus(Israel_subreddit_comment$comment, docvars =data.frame(upvotes=Israel_subreddit_comment$upvotes) )
+
+
+Palestine_corpus <- corpus(Palestine_subreddit_comment$comment, docvars =data.frame(upvotes=Palestine_subreddit_comment$upvotes) )
+
+Others_corpus <- corpus(Others_subreddit_comment$comment, docvars =data.frame(upvotes=Others_subreddit_comment$upvotes) )
+
+
+
+#Meta features of each subreddit before pre-processing
+#make sure tokens>0 to avoid error when calculating TTR
+meta_is <- textstat_summary(Israel_corpus) 
+meta_pa <-textstat_summary(Palestine_corpus) 
+meta_ot <-textstat_summary(Others_corpus) 
+
+meta_is$ttr <- meta_is$types/meta_is$tokens
+meta_pa$ttr <- meta_pa$types/meta_pa$tokens
+meta_ot$ttr <- meta_ot$types/meta_ot$tokens
+
+# avoid rows with any NaN values, i.e tokens=0
+meta_is<- meta_is[complete.cases(meta_is$ttr), ]
+meta_ot<- meta_ot[complete.cases(meta_ot$ttr), ]
+
+mean(meta_is$ttr)
+mean(meta_pa$ttr)
+mean(meta_ot$ttr)
+
+ 
+
+
+#pre-processing, dfm
+Israel_dfm <-
+Israel_corpus%>% 
+  #remove puncuations, numbers, symbols
+  tokens(remove_punct = TRUE, remove_numbers = TRUE, remove_symbols = TRUE) %>% 
+  #remove links
+  tokens_remove(pattern = "http[s]?://\\S+", valuetype = "regex") %>%
+  tokens_remove(stopwords("english"))%>% 
+  #remove single character
+  tokens_remove(pattern = "\\b[A-Za-z]\\b", valuetype = "regex")%>%
+  dfm(tolower = TRUE) 
+
+
+Palestine_dfm <-
+Palestine_corpus%>% 
+  #remove puncuations, numbers, symbols
+  tokens(remove_punct = TRUE, remove_numbers = TRUE, remove_symbols = TRUE) %>% 
+  #remove links
+  tokens_remove(pattern = "http[s]?://\\S+", valuetype = "regex") %>%
+  tokens_remove(stopwords("english"))%>% 
+  #remove single character
+  tokens_remove(pattern = "\\b[A-Za-z]\\b", valuetype = "regex")%>%
+  dfm(tolower = TRUE) 
+
+Others_dfm <-
+Others_corpus%>% 
+  #remove puncuations, numbers, symbols
+  tokens(remove_punct = TRUE, remove_numbers = TRUE, remove_symbols = TRUE) %>% 
+  #remove links
+  tokens_remove(pattern = "http[s]?://\\S+", valuetype = "regex") %>%
+  tokens_remove(stopwords("english"))%>% 
+  #remove single character
+  tokens_remove(pattern = "\\b[A-Za-z]\\b", valuetype = "regex")%>%
+  dfm(tolower = TRUE) 
+
+
+#Meta features of each subreddit after pre-processing
+
+meta_is <- textstat_summary(Israel_dfm)
+meta_pa <-textstat_summary(Palestine_dfm)
+meta_ot <-textstat_summary(Others_dfm)
+
+
+meta_is$ttr <- meta_is$types/meta_is$tokens
+meta_pa$ttr <- meta_pa$types/meta_pa$tokens
+meta_ot$ttr <- meta_ot$types/meta_ot$tokens
+
+# avoid rows with any NaN values, i.e tokens=0
+meta_is<- meta_is[complete.cases(meta_is$ttr), ]
+meta_pa<- meta_pa[complete.cases(meta_pa$ttr), ]
+meta_ot<- meta_ot[complete.cases(meta_ot$ttr), ]
+
+mean(meta_is$ttr)
+mean(meta_pa$ttr)
+mean(meta_ot$ttr)
+
+# Check the range of TTR
+summary(meta_is$ttr)
+summary(meta_pa$ttr)
+summary(meta_ot$ttr)
+
+```
+
+### Readability
+
+```{r}
+
+#Readability
+#We could also compute the readability for each comment for each subreddit
+read_is<- textstat_readability(Israel_corpus, measure = "Flesch.Kincaid")
+read_pa<-textstat_readability(Palestine_corpus, measure = "Flesch.Kincaid")
+read_ot<-textstat_readability(Others_corpus, measure = "Flesch.Kincaid")
+
+#re-calculate ttr, so is can be joined to our read_ datasets
+meta_is <- textstat_summary(Israel_dfm)
+meta_pa <-textstat_summary(Palestine_dfm)
+meta_ot <-textstat_summary(Others_dfm)
+meta_is$ttr <- meta_is$types/meta_is$tokens
+meta_pa$ttr <- meta_pa$types/meta_pa$tokens
+meta_ot$ttr <- meta_ot$types/meta_ot$tokens
+
+#extract ttr to 
+read_is$ttr <- meta_is$ttr
+read_pa$ttr <- meta_pa$ttr
+read_ot$ttr <- meta_ot$ttr
+
+
+#extract upvotes from corpus as well
+read_is$upvotes <- docvars(Israel_corpus, "upvotes")
+read_pa$upvotes <- docvars(Palestine_corpus, "upvotes")
+read_ot$upvotes <- docvars(Others_corpus, "upvotes")
+
+#avoid na cases for average per subreddit
+read_is<-read_is[complete.cases(read_is$Flesch.Kincaid), ]
+read_pa<-read_pa[complete.cases(read_pa$Flesch.Kincaid), ] 
+read_ot<-read_ot[complete.cases(read_ot$Flesch.Kincaid), ] 
+
+#mean readability of three sources
+mean(read_is$Flesch.Kincaid)
+mean(read_pa$Flesch.Kincaid)
+mean(read_ot$Flesch.Kincaid)
+
+
+# Check the range of Flesch-Kincaid scores
+summary(read_is$Flesch.Kincaid)
+summary(read_pa$Flesch.Kincaid)
+summary(read_ot$Flesch.Kincaid)
+
+# Look for any obvious outliers
+boxplot(read_is$Flesch.Kincaid, main = "IS Flesch-Kincaid Scores")
+boxplot(read_pa$Flesch.Kincaid, main = "PA Flesch-Kincaid Scores")
+boxplot(read_ot$Flesch.Kincaid, main = "OT Flesch-Kincaid Scores")
+
+
+#Produce a density plot for readability
+read_is$group <- 'r/Israel'  # Add a group identifier for Israel
+read_pa$group <- 'r/Palestine'  # Add a group identifier for Palestine
+read_ot$group <- 'Others'  # Add a group identifier for Others
+
+# Combine the readability scores with upvotes and the group into one dataframe
+read_combined <- rbind(
+  read_is[, c("Flesch.Kincaid", "upvotes", "group","ttr")],
+  read_pa[, c("Flesch.Kincaid", "upvotes", "group","ttr")],
+  read_ot[, c("Flesch.Kincaid", "upvotes", "group","ttr")]
+)
+
+
+# Convert group to a factor for better plotting
+read_combined$group <- factor(read_combined$group)
+
+
+
+
+#density plot of readability
+ggplot(read_combined, aes(x = Flesch.Kincaid, fill = group)) +
+  geom_density(alpha = 0.8) +  # Set transparency to see overlapping areas
+  scale_fill_manual(values = c("#91A6BF", "#A8BFA6", "#E0CABF")) +  # Manual color setting
+  xlim(c(-4, 20)) +  # Adjusting x-axis limits to a typical FKGL range
+  labs(title = "Density Plot of Flesch-Kincaid Scores Across Subreddits",
+       x = "Flesch-Kincaid Grade Level",
+       y = "Density")+
+  guides(fill=guide_legend(title="Subreddit Group"))  # Add legend title
+
+
+```
+
+### Linear regression
+
+```{r}
+#we could use read_combind to produce a linear regression
+read_combined
+lm1 <- lm(read_combined$upvotes~read_combined$Flesch.Kincaid+read_combined$group + read_combined$ttr)
+summary(lm1)
+
+```
+
+### DFM
+
+```{r}
+#For dfm, weight the term frequency using upvotes
+Israel_dfm_weighted <- Israel_dfm * as.numeric(docvars(Israel_corpus, "upvotes"))
+
+Palestine_dfm_weighted <- Palestine_dfm * as.numeric(docvars(Palestine_corpus, "upvotes"))
+
+Others_dfm_weighted <- Others_dfm * as.numeric(docvars(Others_corpus, "upvotes"))
+
+#For dfm_tfidf, weight the term using upvotes
+Israel_dfm_tfidf_weighted <- dfm_tfidf(Israel_dfm) * as.numeric(docvars(Israel_corpus, "upvotes"))
+
+Palestine_dfm_tfidf_weighted <- dfm_tfidf(Palestine_dfm) * as.numeric(docvars(Palestine_corpus, "upvotes"))
+
+Others_dfm_tfidf_weighted <- dfm_tfidf(Others_dfm) * as.numeric(docvars(Others_corpus, "upvotes"))
+
+
+topfeatures(Israel_dfm_weighted)
+
+topfeatures(Palestine_dfm_weighted)
+
+topfeatures(Others_dfm_weighted)
+
+
+topfeatures(Israel_dfm_tfidf_weighted)
+
+topfeatures(Palestine_dfm_tfidf_weighted)
+
+topfeatures(Others_dfm_tfidf_weighted)
+
+
+#using TF with weighted upvotes, since we are not interested in terms uniquely in certain comment
+#use a descending color plate
+
+mycolors <- c('#FFC8DD','#CDB4DB',"#E2C6FF",'#DBA8AC','#CC92C2', "#AA7BC3", "#944BBB","#5E548E",'#6F2DBD')
+
+
+#use top 100 words, limit the min and max size to display many words and reduce white space of the plot
+textplot_wordcloud(Israel_dfm_weighted, max_words = 200, color = mycolors,
+    rotation = 0.2, min_size = 0.1,max_size = 8)
+
+
+
+textplot_wordcloud(Palestine_dfm_weighted, max_words = 200, color =mycolors,
+    rotation = 0.2, min_size = 0.1,max_size = 8)
+
+
+
+textplot_wordcloud(Others_dfm_weighted, max_words = 200, color =mycolors,
+ rotation = 0.2, min_size = 0.1,max_size = 8)
+
+
+
+```
+
+\subsection{Sentiment Analysis}
+
+Sentiment analysis, often known as opinion mining, involves the statistical categorization of texts based on sentiment or emotion by assigning numeric values to them. This process allows for the quantitative assessment of feelings expressed in written content, making it possible to gauge the overall sentiment or emotional tone of a dataset systematically \cite{Rani2017SentimentAnalysisSystem}. \\
+
+
+
+Researchers focused on sentiment analysis at the word level, or using the unigram approach, aim to extract valuable insights from the basic units of communication within a text. By examining individual words, researchers can gain additional information beyond mere sentiment, such as the demographic characteristics of the users, which can provide deeper insights into the context and the perspectives of the commenter. This approach helps to enrich the understanding of how different groups may perceive or express sentiments in the Palestine/Israel contexts we are interested in \citep{Yue2019SentimentSurvey}. \\
+
+We use the "syuzhet" package to generate a sentiment score for each complete text input. The text pre-processing is carried out again using the "stringr" package, following the methods described in section 2.2. However, this time, we retain the stop words, as retaining these can be critical for maintaining the emotional context of the text, as explained in \citet{Hill2021SentimentAnalysis}. Many stop-word lists, including the default ones for English, actually contain words that carry sentiment. Since our analysis involves matching terms to a sentiment lexicon, removing these stop words could inadvertently eliminate important sentiment-bearing words. Therefore, there is no benefit in removing stop words for this specific purpose, as it might lead to a loss of valuable sentiment data in the analysis.\\
+
+### Sentiment Analysis
+```{r}
+#simplify all other subreddits into Others
+Others_subreddit_comment$Subreddit <- "Others"
+
+#combine all comments
+Combine_Comments <- rbind(Israel_subreddit_comment, Palestine_subreddit_comment,Others_subreddit_comment)
+
+dim(Combine_Comments)
+
+#re-construct corpus for combined comments, include upvotes, date and subreddit as docvar
+Combine_Comments_corpus <- corpus(Combine_Comments$comment, docvars =data.frame
+                             (upvotes=Combine_Comments$upvotes,
+                               date=Combine_Comments$date,
+                              source=Combine_Comments$Subreddit)
+                             )
+
+
+#extract the comments into pure text, helpful to do sentiment analysis
+text_comments <- Combine_Comments$comment
+
+#use stringr from week4 to do pre-processing without creating corpus
+text_comments_cleaned <- 
+  text_comments %>% 
+  str_replace_all("[[:punct:]]", "") %>% #remove punctuation
+  str_replace_all( "[[:digit:]]", "") %>% #remove numbers
+  str_replace_all( "https?://\\S+", "") %>% # remove links
+  str_replace_all( "[^\\w\\s]", "") #Remove symbols, all non-word and non-space characters
+  
+
+#combine the cleaned df
+cleaned_df_Combine_Comments <- Combine_Comments[,c("comment","upvotes","date","Subreddit")]
+cleaned_df_Combine_Comments$cleaned_comment <- text_comments_cleaned
+
+#sentiment score using afinn
+sentiment_afinn <- get_sentiment(cleaned_df_Combine_Comments$comment, method = "afinn", lowercase = TRUE)
+
+#distribution and range of sentiment score using afinn
+hist(sentiment_afinn)
+summary(sentiment_afinn)
+
+
+
+#load the lexicon
+lexicon <- readtext("SemEval2015-English-Twitter-Lexicon.txt")
+  
+#sentiment score using the lexicon
+sentiment_lexicon <-get_sentiment(cleaned_df_Combine_Comments$comment,  lowercase = TRUE,lexicon = lexicon)
+#distribution and range of sentiment score using the lexicon
+hist(sentiment_lexicon)
+summary(sentiment_lexicon)
+
+
+#distribution of two lexicons are similar, variance of afinn is larger, indicating sharper change
+var(sentiment_afinn)
+var(sentiment_lexicon)
+
+#combine the sentiment score into dataframe
+full_Comments <- cbind(cleaned_df_Combine_Comments,sentiment_afinn, sentiment_lexicon)
+
+#Create a density plot to show distribution of sentiment score
+ggplot(cleaned_df_Combine_Comments, aes(x = sentiment_lexicon)) +
+  geom_histogram(bins = 100, fill = "#DBA8AC", color = "black") +
+  labs(title = "Distribution of Sentiment Scores using Twitter Lexicon", x = "Sentiment Score", y = "Frequency") 
+
+```
+
+
+
+```{r}
+
+#by mannully check the top score for each lexicon, the lexicon makes more sense
+head(arrange(full_Comments,-sentiment_lexicon),10)
+
+head(arrange(full_Comments,+sentiment_lexicon),10)
+
+
+```
+
+
+
+```{r}
+
+
+#we need to classify the sentiment into classes of positive, negative, neutral
+#(-0.5,0.5) is neutral, <=-0.5 is negative, >=0.5 is positive
+full_Comments <- full_Comments %>%
+  mutate(category = case_when(
+    sentiment_lexicon > 0.5 ~ "Positive",
+    sentiment_lexicon < -0.5 ~ "Negative",
+    TRUE ~ "Neutral"  # Default case if none of the above conditions are true
+  ))
+
+
+table(full_Comments$category) #33%, 42%, 25%
+
+
+
+#try to visualize the category 
+
+# Summarize the data to count the number of comments in each category for each subreddit
+category_counts <-
+  full_Comments %>%
+  group_by(Subreddit, category)%>%
+  summarise(count = n(), .groups = 'drop')
+
+
+# Calculate the total comments per subreddit
+total_counts <- category_counts %>%
+  group_by(Subreddit) %>%
+  summarise(total = sum(count))
+
+# Join the total back to the original summary and calculate percentages
+category_percentages <- category_counts %>%
+  left_join(total_counts, by = "Subreddit") %>%
+  mutate(percentage = (count / total) * 100)
+
+
+# provide the bar charts of counts of each sentiment within each sub-reddit
+#counts does not say much, percentage is better
+ggplot(category_counts, aes(x = Subreddit, y = count, fill = category)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "Count of Each Category by Subreddit",
+       x = "Subreddit",
+       y = "Count",
+       fill = "Category") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  
+
+# Create a pie chart
+ggplot(category_percentages, aes(x = "", y = percentage, fill = category)) +
+  geom_bar(stat = "identity") +
+  coord_polar(theta = "y") + ## Converts the bar chart to a pie chart
+  facet_wrap(~ Subreddit) +  # Creates a separate pie chart for each subreddit
+  labs(title = "Percentage of Sentiment Category by Subreddit",
+       x = NULL,
+       y = NULL,
+       fill = "Category") +
+  geom_text(aes(label = sprintf("%.1f%%", percentage)), position = position_stack(vjust = 0.5)) + #display the percentages
+  theme_void() +
+  scale_fill_manual(values = c("Positive" = "#d0f4de", "Negative" = "#f28482", "Neutral" = "#edede9"))
+
+```
+
+
+```{r}
+full_Comments
+
+#visualize the density of each sentiment category over time 
+ggplot(full_Comments, aes(x = date, color = category)) +
+  geom_density(aes(group = category)) +  
+  labs(title = "Density of Sentiment Categories Over Time",
+       x = "Date",
+       y = "Density",
+       color = "Category") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  scale_color_manual(values = c("Positive" = "#2CA02C", "Negative" = "#D62728", "Neutral" = "#1F77B4")) #use darker color plates
+
+#visualize the density of each sentiment category over time 
+ggplot(full_Comments, aes(x = date, color = category)) +
+  geom_density(aes(group = category)) +  
+  labs(title = "Density of Sentiment Categories Over Time",
+       x = "Date",
+       y = "Density",
+       color = "Category") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  scale_color_manual(values = c("Positive" = "#2CA02C", "Negative" = "#D62728", "Neutral" = "#1F77B4")) #use darker color plates
+
+```
+
+
+## 2. Unsupervised: Topic Modelling
+
+LDA
+```{r}
+#dfm for all comments
+Combine_Comments_dfm<-
+  Combine_Comments_corpus %>%
+  #remove puncuations, numbers, symbols
+  tokens(remove_punct = TRUE, remove_numbers = TRUE, remove_symbols = TRUE) %>% 
+  #remove links
+  tokens_remove(pattern = "http[s]?://\\S+", valuetype = "regex") %>%
+  tokens_remove(stopwords("english"))%>% 
+  #remove single character
+  tokens_remove(pattern = "\\b[A-Za-z]\\b", valuetype = "regex")%>%
+  dfm(tolower = TRUE) 
+
+
+
+#There are 1113 docs are all zero features, might because of pre-processing, remove
+feature_sums <- rowSums(Combine_Comments_dfm)
+sum(feature_sums == 0)
+# Filter out documents with no features
+Combine_Comments_dfm <- Combine_Comments_dfm[feature_sums > 0, ]
+
+
+
+```
+
+
+```{r}
+# Number of topics, determine k
+#Elbow Method
+
+#we could mannuly try differnt k and see which k is the best, but since the training is very slow
+#we use k=3
+
+```
+
+
+```{r}
+  k <- 4
+
+# Build LDA model for unigram
+lda_model <- LDA(Combine_Comments_dfm, k = k, control = list(seed = 1335))
+
+# Build LDA model for unigram
+#lda_model_bigram <- LDA(comment_bigram_dfm2, k = k, control = list(seed = 1238))
+
+# Show terms in topics
+terms(lda_model, 10)
+
+# save the model trained
+saveRDS(lda_model, "lda_model_unigram_k=4")
+
+# Assign topics to documents
+topics <- topics(lda_model)
+
+
+#show the probability of a word being associated to a topic
+beta_topics <- tidy(lda_model,matrix = "beta") #create the beta model
+beta_topics
+#the higher the beta, the more frequent that term appears in that topic
+
+#Grouping the terms by topic
+beta_top_terms <-
+beta_topics %>%
+  group_by(topic) %>%
+  slice_max(beta, n=10)%>% #choose top 10 beta for each topic
+  ungroup()%>% #make sure arrange apply to the whole dataset
+  arrange(topic, -beta) #sort each topic wrt decreasing in beta
+
+#Display the grouped terms on the charts
+beta_top_terms %>%
+  mutate(term = reorder_within(term, by = beta, within = topic)) %>%
+  ggplot(aes(x=beta, y=term, fill=factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~topic, scales = "free")+
+  scale_y_reordered()+ #to display term properly
+  labs(title = "Top 10 Important Words to Each Topic", x = "Beta Value", y = "Terms")
+
+
+#Examine per document per topic probability
+gamma_documents <- tidy(lda_model, matrix = "gamma")
+#the probability of each document to made up each topic
+gamma_documents
+
+gamma_documents$chapter <- rep(1:dim(Combine_Comments_dfm)[1],k)
+
+#plot gamma results
+gamma_documents%>%
+  ggplot(aes(x=chapter, y=gamma, group= factor(topic), color = factor(topic)))+
+  geom_line()+
+  facet_wrap(~factor(topic), ncol=1)
+#not significant 
+
+```
+
+
+
+```{r}
+
+# First, assign the most dominant topic to each document in full_Comments
+topic_distributions <- posterior(lda_model, newdata = Combine_Comments_dfm)
+dominant_topics <- apply(topic_distributions$topics, 1, which.max)
+
+
+# Add the dominant topic as a new column in full_Comments
+full_Comments$dominant_topic <- dominant_topics
+
+# Summarize sentiment scores by topic
+sentiment_by_topic <- full_Comments %>%
+  group_by(dominant_topic) %>%
+  summarise(mean_sentiment = mean(sentiment_lexicon, na.rm = TRUE),
+            .groups = 'drop')
+
+# Print summary, average senrtiment score for each theme
+print(sentiment_by_topic)
+
+```
+
+
+### Geopolitical Stance Determination
+```{r}
+# Function to determine stance
+# we use topic 4= Palestine since genocide appears, 3 = Israel
+determine_geopolitical_stance <- function(sentiment_score, topic_index) {
+  if (sentiment_score <= -1) {
+    return('Against')
+  } else if (sentiment_score >= 1 && topic_index == 3) {
+    return('Supports Israel')
+  } else if (sentiment_score >= 1 && topic_index == 4) {
+    return('Supports Palestine')
+  } else {
+    return('Neutral/Stance Not Clear')
+  }
+}
+
+# Apply this function
+full_Comments$stance <- mapply(determine_geopolitical_stance, full_Comments$sentiment_lexicon, full_Comments$dominant_topic)
+
+# Summary of stances
+print(table(full_Comments$stance))
+
+
+
+```
+
+```{r}
+#visualize the geopolitical stances we predict
+stance_data <- data.frame(
+  Category = c("Against Both", "Neutral/Stance Not Clear", "Supports Israel", "Supports Palestine"),
+  Count = c(33726, 92315, 5534, 6108)
+)
+
+# Create the bar chart
+ggplot(stance_data, aes(x = Category, y = Count, fill = Category)) +
+  geom_bar(stat = "identity") +  # Create bars with direct count heights
+  geom_text(aes(label = Count), vjust = -0.1, color = "black") +  # Add text labels on top of the bars
+  labs(title = "Distribution of Predicted Geo-political Stances", x = "Stance", y = "Counts of Comments") +
+  theme_minimal() +  # Apply a minimal theme
+  theme(
+    legend.position = "none",  # Remove the legend
+    axis.text.x = element_text(angle = 45, hjust = 1)  # Rotate x-axis labels for better read
+  ) +
+  scale_fill_manual(values = c("Against Both" = "#f28482","Neutral/Stance Not Clear" = "#DBA8AC","Supports Israel" = "#6F2DBD","Supports Palestine" = "#2CA02C" ) )
+
+```
+
+

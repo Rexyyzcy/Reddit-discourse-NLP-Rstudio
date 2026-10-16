@@ -1,0 +1,110 @@
+---
+title: "W4_Homework"
+date: "2024-02-01"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include = FALSE}
+#knitr::opts_chunk$set(eval = FALSE)
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+
+library(quanteda)
+library(syuzhet)
+library(stringr)
+```
+
+# Part 2: Sentiment trajectories of Russian-Ukrainian War (SUBMIT THIS HOMEWORK)
+
+Select some (e.g. five) speeches each from President Vladimir Putin of Russia and President Volodymyr Zelensky of Ukraine, preferably from similar timeframes. Then, analyse the sentiment trajectories within these speeches to understand how both leaders express emotions. You can source the speeches from the provided websites:
+
+- http://en.kremlin.ru/ for Putin's speeches. 
+- https://www.president.gov.ua/en for Zelenksy's speeches
+
+For this task you can manually copy the speeches. 
+
+```{r echo=TRUE, results='hide'}
+# load the ncs script by pointing R to the location on your computer using the`source` command:
+source('ncs.R')
+
+#load speeches data
+#RU_Presidents_speaches <- read.csv("Russian-Ukraine_PresidentsSpeeches.csv")
+#RU_Presidents_speaches$id <- c(paste("Ukraine", 1:5, sep = "_"),paste("Russian", 1:5, sep = "_"),1)
+#RU_Presidents_speaches<-RU_Presidents_speaches[-11,]
+
+#save(RU_Presidents_speaches, file="RU_Presidents_speaches.Rdata")
+
+load("RU_Presidents_speaches.RData")
+RU_Presidents_speaches
+
+# extract length-standardised trajectory
+speech_traj <- ncs_full(txt_input_col = RU_Presidents_speaches$Text,
+                      txt_id_col = RU_Presidents_speaches$id)
+
+
+View(speech_traj)
+#we want each row representing a speech, so we take transpose
+t_speech_traj <- t(speech_traj)
+View(t_speech_traj)
+
+
+# the transposition creates a matrix that we want to set as a dataframe 
+df_t_speech_traj <- data.frame(t_speech_traj, row.names = row.names(t_speech_traj))
+
+
+# we need to create a variable that contains the President name
+df_t_speech_traj$President <- c(rep("Zelenskyy",5), rep("Putin", 5))
+df_t_speech_traj$President
+
+```
+
+```{r echo=TRUE, results='hide'}
+# Next we aggregate the data, we take all 10 speeches.  
+shape_by_President <- aggregate(df_t_speech_traj, 
+                              by = list(df_t_speech_traj$President), 
+                              mean)
+
+# we now have the average per vlogger for each of the 100 bin values
+shape_by_President
+
+# plot the two trajectories
+# for the plot, we want the trajectories in the columns, use the transpose function
+t_shape_by_President <- t(shape_by_President)
+
+#Create a data frame
+dt_t_shape_by_President <- data.frame(t_shape_by_President)
+
+#Set the column names to presidents' name
+names(dt_t_shape_by_President) <- c("Putin", "Zelenskyy")
+
+# remove the first row now
+dt_t_shape_by_President <- dt_t_shape_by_President[-1,]
+
+#change to numeric
+dt_t_shape_by_President$Putin <- as.numeric(dt_t_shape_by_President$Putin)
+dt_t_shape_by_President$Zelenskyy <- as.numeric(dt_t_shape_by_President$Zelenskyy)
+
+#check the range
+summary(dt_t_shape_by_President)
+```
+
+
+```{r echo=TRUE}
+# now plot your data 
+{plot(dt_t_shape_by_President$Putin,
+       type='l',
+       col = 'red',
+       ylim = c(-0.7,0.8),
+       ylab = 'Sentiment',
+       xlab = 'Temporal progression %',
+       main = 'Trajectories: Putin (red), Zelenskyy (yellow)')
+lines(dt_t_shape_by_President$Zelenskyy, col='orange')
+abline(h=0, lty=4)
+  }
+
+```
+
+
+
+

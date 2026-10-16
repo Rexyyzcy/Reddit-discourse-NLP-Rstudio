@@ -1,0 +1,175 @@
+---
+title: "W2-Homework"
+date: "2024-01-23"
+output:
+  html_document:
+    df_print: paged
+  html_notebook:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval=FALSE)
+```
+
+## Homework
+
+Please submit your solutions for Part 1 and Part 2 by next week Tuesday to receive feedback.
+
+### Part 1: Scraping data from a pet sale website 
+The webpage [https://www.preloved.co.uk/classifieds/pets/other-pets](https://www.preloved.co.uk/classifieds/pets/other-pets) offers a platform to sell and buy a range of second hand or pre-owned exotic animals for sale online. 
+
+Use web scraping to extract data from this trading website. The data you want to scrape is related to exotic pets. Extract the follow details: 
+
+- listing name (title of sale)
+- the asking price
+- details
+- the location
+
+Write the collected data to a comma-separated values (CSV) file. You do not need to use RSelenium for this task, you can write a for loop to visit each page on the website and extract the content that you need. 
+# Notice the link structure of each page contains the page number at the end e.g. page=1 
+# "https://www.preloved.co.uk/classifieds/pets/other-pets?page=1"
+# We can now cycle through 1-num_pages and scrape
+
+For this task you may want to use the `stringr` package to manipulate strings such as removing certain characters.
+
+```{r}
+#read the url and the webpage
+library(rvest)
+pet_url <- "https://www.preloved.co.uk/classifieds/pets/other-pets"
+
+pet_webpage <- read_html(pet_url)
+
+#Step 1. Single Page
+
+#listing name (title of sale)
+pet_webpage %>% html_elements("h2") %>% 
+                html_elements("span") %>%
+                html_text()
+
+
+#price
+pet_webpage %>% 
+                html_elements("header") %>% 
+                html_elements("span[itemprop='price']")  %>% 
+                html_attr("content")
+  
+
+#details
+pet_webpage %>% html_elements("h2") %>% 
+                html_elements("a")%>% 
+                html_elements("span[itemprop='name']")%>%
+                html_text()
+
+#the location
+pet_webpage %>% 
+                html_elements("p") %>% 
+                html_elements("span.is-location") %>% #same as span[class=is-location]
+                html_text()
+
+
+#Step 2. For loop
+
+
+#initiate list
+Total_list_name <- c()
+Total_price <- c()
+Total_details <- c()
+Total_location <- c()
+
+for (i in 1:10) {
+  pet_url <- paste("https://www.preloved.co.uk/classifieds/pets/other-pets", "?page=",i, sep="")
+  pet_webpage <- read_html(pet_url)
+  
+  #listing name (title of sale)
+  list_name<-pet_webpage %>% html_elements("h2") %>% 
+                html_elements("span") %>%
+                html_text()
+  
+  #price
+  list_price<- pet_webpage %>% 
+                html_elements("header") %>% 
+                html_elements("span[itemprop='price']")  %>% 
+                html_attr("content")
+  
+  #details
+   list_details <-pet_webpage %>% html_elements("h2") %>% 
+                html_elements("a")%>% 
+                html_elements("span[itemprop='name']")%>%
+                html_text()
+  
+  #the location
+  list_location <-pet_webpage %>% 
+                html_elements("p") %>% 
+                html_elements("span.is-location") %>% #same as span[class=is-location]
+                html_text()
+  
+  
+  Total_list_name <-c(Total_list_name,list_name)
+  Total_price <- c(Total_price,list_price )
+  Total_details <- c(Total_details, list_details)
+  Total_location <- c(Total_location,list_location)
+  
+}
+
+pet_data <-cbind(Total_list_name, Total_price, Total_details, Total_location)
+
+as.data.frame(pet_data)
+
+```   
+
+
+### Part 2: Obtain song URLs from Genius API and get lyrics using web scraping
+
+Last week you were asked to explore [Genius API](https://docs.genius.com/) to see if you could extract data from [Genius website](https://docs.genius.com/) ("Genius is the world's biggest collection of song lyrics and musical knowledge."). The Genius API has functions for artist and song identification. However, it does not offer direct access to song lyrics. To obtain the lyrics of songs by your desired artists, you can leverage the API to obtain URLs and then use web scraping techniques to obtain the lyrics from the URLs. 
+
+Your objective is to compile a dataset featuring several drill music artists. Drill Music has been studied by crime scientists using data science techniques, see [this study](https://arxiv.org/ftp/arxiv/papers/2004/2004.04598.pdf). 
+
+Below is some initial code to start you on this task. Please note that you will need to register with the Genius API and obtain an access token to use the API. 
+
+See the [geniusr](https://cran.r-project.org/web/packages/geniusr/index.html) for wrapper package for accesing Genius API.  
+
+```{r}
+library(geniusr)   
+#searching the artists using genius API to find their artist id
+
+
+## Client ID: [REDACTED]
+## Client Secret: [REDACTED]
+## CLIENT ACCESS TOKEN: [REDACTED]
+
+
+credential <- Sys.getenv("GENIUS_ACCESS_TOKEN")
+#get the artist id and fed to next function
+search_artist(search_term = "Central Cee", n_results = 20, access_token = credential)
+
+centralcee_songs <- get_artist_songs_df(artist_id = 897106, sort = "popularity", access_token = credential)
+
+centralcee_songs
+
+#Dont use [,c()], it does not return vector!
+song_url <-centralcee_songs[["song_lyrics_url"]]
+
+
+Total_lyrics <- c()
+
+for (i in song_url) {
+  
+  page <- read_html(i)
+  
+  lyrics <- 
+    page %>% 
+    html_element("div.kUgSbL") %>%
+    html_text()
+  
+  lyrics <- toString(lyrics)
+  
+  Total_lyrics<- c(Total_lyrics, lyrics)
+}
+
+
+Total_lyrics
+
+cbind(centralcee_songs, Total_lyrics)
+
+```
